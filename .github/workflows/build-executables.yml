@@ -1,0 +1,183 @@
+name: Build executables
+
+# A pushed v* tag builds that tag and publishes a release. A manual run with a tag
+# does the same for a tag that already exists (the build tooling comes from the branch
+# the run starts from, the source from the tag). A manual run without a tag, and every
+# pull request, builds and checks the executables without publishing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing v* tag to build and release. Leave empty for a test build."
+        required: false
+        default: ""
+  pull_request:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  NAME: GLEAPP-MapDownloader
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: windows-11-arm
+            label: windows-arm64
+          - os: macos-latest
+            label: macos-arm64
+          - os: macos-15-intel
+            label: macos-x64
+          - os: ubuntu-22.04
+            label: linux-x64
+          - os: ubuntu-22.04-arm
+            label: linux-arm64
+    steps:
+      - name: Check out the build tooling
+        uses: actions/checkout@v4
+        with:
+          path: ci
+
+      - name: Check out the source to build
+        uses: actions/checkout@v4
+        with:
+          path: src
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Read the version, and check it matches the tag
+        id: version
+        shell: python
+        env:
+          RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}
+        run: |
+          import os, re
+          src = open("src/mapdownloader.py", encoding="utf-8").read()
+          version = "v" + re.search(r'^__version__ = "([^"]+)"', src, re.M).group(1)
+          tag = os.environ["RELEASE_TAG"]
+          if tag:
+              assert tag == version, f"tag {tag} does not match __version__ {version}"
+              print("tag", tag, "matches __version__")
+          else:
+              print("test build of", version)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"version={version}\n")
+
+      - name: Install PyInstaller, and Pillow to convert the icon
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow
+
+      - name: Write the window's own icon as a PNG
+        working-directory: src
+        shell: python
+        run: |
+          import base64, re
+          src = open("mapdownloader.py", encoding="utf-8").read()
+          body = re.search(r"ICON_64 = \((.*?)\n\)", src, re.S).group(1)
+          png = base64.b64decode("".join(re.findall(r'"([^"]*)"', body)))
+          assert png[:8] == b"\x89PNG\r\n\x1a\n"
+          open("icon.png", "wb").write(png)
+
+      - name: Build the executable
+        working-directory: src
+        run: pyinstaller --noconfirm --clean --onefile --console --icon icon.png --name ${{ env.NAME }} mapdownloader.py
+
+      - name: A display for the window check on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+
+      - name: Check the executable writes what the source writes, and opens its window
+        shell: bash
+        run: |
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          run=""; [ "$RUNNER_OS" = "Linux" ] && run="xvfb-run -a"
+          $run python ci/tools/smoke_frozen.py src "src/dist/$NAME$ext"
+
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -e
+          pkg="$NAME-${VERSION}-${{ matrix.label }}"
+          mkdir -p "pkg/$pkg"
+          cp ci/packaging/README.txt src/LICENSE "pkg/$pkg/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "src/dist/$NAME.exe" "pkg/$pkg/"
+            (cd "pkg/$pkg" && sha256sum "$NAME.exe" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+            (cd pkg && 7z a -bd "../$pkg.zip" "$pkg" > /dev/null)
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            cp "src/dist/$NAME" "pkg/$pkg/"
+            (cd "pkg/$pkg" && shasum -a 256 "$NAME" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+            (cd pkg && ditto -c -k --keepParent "$pkg" "../$pkg.zip")
+          else
+            cp "src/dist/$NAME" "pkg/$pkg/"
+            (cd "pkg/$pkg" && sha256sum "$NAME" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+            (cd pkg && tar -czf "../$pkg.tar.gz" "$pkg")
+          fi
+          ls -la "$pkg".*
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}-${{ matrix.label }}
+          path: |
+            ${{ env.NAME }}-*.zip
+            ${{ env.NAME }}-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the build tooling
+        uses: actions/checkout@v4
+        with:
+          path: ci
+
+      - name: Check out the source that was built
+        uses: actions/checkout@v4
+        with:
+          path: src
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums of the archives and the source file
+        run: |
+          cp src/mapdownloader.py artifacts/
+          cd artifacts && sha256sum "$NAME"-* mapdownloader.py > SHA256SUMS.txt && cat SHA256SUMS.txt
+          test "$(wc -l < SHA256SUMS.txt)" -eq 7
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          sed "s/{{VERSION}}/${TAG}/g" ci/packaging/release-notes.md > notes.md
+          gh release create "$TAG" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$NAME ${TAG}" \
+            --notes-file notes.md

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+build/
+dist/
+*.spec
+icon.png
+
+# Downloaded maps never belong in this repository. The tests build their planet in
+# memory at run time.
+*.pmtiles
+*.pmtiles.part

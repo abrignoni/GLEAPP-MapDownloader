@@ -1,0 +1,44 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.14"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip pytest
+      - name: A display for the window test on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - name: Run the tests (the window test must run, not skip)
+        shell: bash
+        run: |
+          set -o pipefail
+          run=""; [ "$RUNNER_OS" = "Linux" ] && run="xvfb-run -a"
+          $run python -m pytest tests -q -rs 2>&1 | tee pytest.txt
+          if grep -q "SKIPPED" pytest.txt; then echo "a test was skipped"; exit 1; fi
