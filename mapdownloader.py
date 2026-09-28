@@ -941,6 +941,11 @@ def main_gui() -> int:
               "for. " + ATTRIBUTION + " Copy the file to the offline machine and use "
               "Maps → Import in GLEAPP.", style="Muted.TLabel")
     note.grid(row=7, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    # A starting width, or the window sizes itself to the note unwrapped (over 1,000
+    # points, wider than a small screen, with Download off the edge); rewrap follows.
+    start = int(600 * max(px, 1.0))
+    info_lbl.configure(wraplength=start)
+    note.configure(wraplength=start)
 
     def rewrap(event):                  # wrap the two text blocks at the window's width
         info_lbl.configure(wraplength=max(200, event.width - int(30 * px)))

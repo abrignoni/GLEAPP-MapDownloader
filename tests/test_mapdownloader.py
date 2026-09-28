@@ -255,6 +255,8 @@ def test_window_downloads_the_box_shown_not_an_earlier_size_check(url, tmp_path,
 
         seen["header logo"] = [str(w.cget("image")) for w in ws
                                if isinstance(w, ttk.Label) and str(w.cget("image"))]
+        root.update_idletasks()
+        seen["width"] = root.winfo_reqwidth() / max(root.winfo_fpixels("1i") / 96, 1.0)
 
         def check_size():
             area.set("Exact box…")
@@ -301,5 +303,6 @@ def test_window_downloads_the_box_shown_not_an_earlier_size_check(url, tmp_path,
                 pass
     assert "timeout" not in seen, seen
     assert len(seen["header logo"]) == 1                        # the map logo in the header
+    assert seen["width"] < 800, seen["width"]       # fits a small screen; unwrapped it was 1,011
     assert seen["first file"] == pytest.approx([0.0, 0.0, 40.0, 30.0])
     assert seen["plans made by the last download"] == 0
