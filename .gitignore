@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!packaging/mapdownloader.spec
 icon.png
 
 # Downloaded maps never belong in this repository. The tests build their planet in

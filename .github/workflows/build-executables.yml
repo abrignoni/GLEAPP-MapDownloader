@@ -4,6 +4,12 @@ name: Build executables
 # does the same for a tag that already exists (the build tooling comes from the branch
 # the run starts from, the source from the tag). A manual run without a tag, and every
 # pull request, builds and checks the executables without publishing anything.
+#
+# Windows and Linux get one executable each. macOS gets what GLEAPP ships: an .app
+# bundle in a disk image. When the MACOS_* secrets are set, the .app is signed with a
+# Developer ID under the hardened runtime, the signed app is tested again, and the .dmg
+# is signed, notarised and stapled. A tag refuses to publish an unsigned Mac build; a
+# pull request or a manual test build without the secrets still builds, unsigned.
 
 on:
   workflow_dispatch:
@@ -22,11 +28,16 @@ permissions:
 
 env:
   NAME: GLEAPP-MapDownloader
+  APP: GLEAPP Map Downloader.app
+  RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}
 
 jobs:
   build:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    # A step's `if` cannot read `secrets`, so whether macOS can be signed is decided here.
+    env:
+      MACOS_SIGN: ${{ secrets.MACOS_CERT_P12 != '' && 'yes' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -62,8 +73,6 @@ jobs:
       - name: Read the version, and check it matches the tag
         id: version
         shell: python
-        env:
-          RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}
         run: |
           import os, re
           src = open("src/mapdownloader.py", encoding="utf-8").read()
@@ -77,25 +86,31 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"version={version}\n")
 
-      - name: Install PyInstaller, and Pillow to convert the icon
+      - name: Install PyInstaller (and dmgbuild on macOS)
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller pillow
+          python -m pip install "pyinstaller==6.22.2"
+          if [ "$RUNNER_OS" = "macOS" ]; then python -m pip install "dmgbuild==1.6.7"; fi
 
-      - name: Write the window's own icon as a PNG
+      - name: Build the executable (Windows, Linux)
+        if: runner.os != 'macOS'
         working-directory: src
-        shell: python
+        shell: bash
         run: |
-          import base64, re
-          src = open("mapdownloader.py", encoding="utf-8").read()
-          body = re.search(r"ICON_64 = \((.*?)\n\)", src, re.S).group(1)
-          png = base64.b64decode("".join(re.findall(r'"([^"]*)"', body)))
-          assert png[:8] == b"\x89PNG\r\n\x1a\n"
-          open("icon.png", "wb").write(png)
+          pyinstaller --noconfirm --clean --onefile --console --icon packaging/icon.ico --name "$NAME" mapdownloader.py
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          echo "BIN=src/dist/$NAME$ext" >> "$GITHUB_ENV"
 
-      - name: Build the executable
+      - name: Build the app bundle (macOS)
+        if: runner.os == 'macOS'
         working-directory: src
-        run: pyinstaller --noconfirm --clean --onefile --console --icon icon.png --name ${{ env.NAME }} mapdownloader.py
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean packaging/mapdownloader.spec
+          test -d "dist/$APP"
+          echo "BIN=src/dist/$APP/Contents/MacOS/$NAME" >> "$GITHUB_ENV"
+          plutil -p "dist/$APP/Contents/Info.plist"
 
       - name: A display for the window check on Linux
         if: runner.os == 'Linux'
@@ -104,9 +119,139 @@ jobs:
       - name: Check the executable writes what the source writes, and opens its window
         shell: bash
         run: |
-          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           run=""; [ "$RUNNER_OS" = "Linux" ] && run="xvfb-run -a"
-          $run python ci/tools/smoke_frozen.py src "src/dist/$NAME$ext"
+          $run python ci/tools/smoke_frozen.py src "$BIN"
+
+      # A tag must not ship an unsigned Mac build by accident. Without the secrets a pull
+      # request or a test build still builds, unsigned; a tag stops here.
+      - name: macOS, refuse an unsigned release
+        if: runner.os == 'macOS' && env.RELEASE_TAG != '' && env.MACOS_SIGN != 'yes'
+        run: |
+          echo "::error::MACOS_CERT_P12 is not set; a tagged release must be signed"
+          exit 1
+
+      # A throwaway keychain holding only the Developer ID certificate, deleted by the
+      # last macOS step whatever happens.
+      - name: macOS, import the Developer ID certificate
+        if: runner.os == 'macOS' && env.MACOS_SIGN == 'yes'
+        shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PW="$(openssl rand -base64 24)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PW" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      # PyInstaller signs ad hoc while it builds. Inside out, every Mach-O in the bundle
+      # first, then the bundle itself with the entitlements the hardened runtime needs;
+      # --deep is not used to sign, as Apple advises. find does not follow symlinks, so the
+      # Frameworks/Resources cross-links of a PyInstaller bundle are signed once.
+      - name: macOS, sign the app
+        if: runner.os == 'macOS' && env.MACOS_SIGN == 'yes'
+        shell: bash
+        env:
+          ID: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          TEAM: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          A="src/dist/$APP"
+          find "$A/Contents" -type f ! -path "$A/Contents/MacOS/$NAME" -print0 |
+            while IFS= read -r -d '' f; do
+              if file -b "$f" | grep -q 'Mach-O'; then
+                codesign --force --timestamp --options runtime --sign "$ID" "$f"
+              fi
+            done
+          codesign --force --timestamp --options runtime \
+            --entitlements src/packaging/entitlements.plist --sign "$ID" "$A"
+          codesign --verify --strict --deep --verbose=2 "$A"
+          codesign -dv --verbose=2 "$A" 2>&1 | tee sig.txt
+          grep -q "^TeamIdentifier=$TEAM$" sig.txt || { echo "::error::signed by the wrong team"; exit 1; }
+          grep -q "^Timestamp=" sig.txt || { echo "::error::signature has no timestamp"; exit 1; }
+          grep -q "flags=.*runtime" sig.txt || { echo "::error::hardened runtime not set"; exit 1; }
+
+      # The hardened runtime is what breaks a frozen app, and the check above ran the
+      # unsigned build, not this one.
+      - name: macOS, check the signed app again
+        if: runner.os == 'macOS' && env.MACOS_SIGN == 'yes'
+        run: python ci/tools/smoke_frozen.py src "$BIN"
+
+      - name: macOS, the disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          dmgbuild -s src/packaging/dmg_settings.py \
+            -D app="src/dist/$APP" -D icon=src/packaging/icon.icns \
+            -D background=src/packaging/dmg_background.png \
+            "GLEAPP Map Downloader" "$NAME.dmg"
+          hdiutil verify "$NAME.dmg"
+
+      # Notarising the .dmg covers the signed .app inside it, and the stapled ticket lets
+      # Gatekeeper accept it offline. A rejection prints Apple's log, which names the file.
+      - name: macOS, sign, notarise and staple the disk image
+        if: runner.os == 'macOS' && env.MACOS_SIGN == 'yes'
+        shell: bash
+        env:
+          ID: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          DMG="$NAME.dmg"
+          codesign --force --timestamp --sign "$ID" "$DMG"
+          printf '%s\n' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool submit "$DMG" --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" \
+            --wait --output-format json | tee notary.json
+          SUB_ID="$(python -c 'import json; print(json.load(open("notary.json"))["id"])')"
+          STATUS="$(python -c 'import json; print(json.load(open("notary.json"))["status"])')"
+          if [ "$STATUS" != "Accepted" ]; then
+            xcrun notarytool log "$SUB_ID" --key "$RUNNER_TEMP/notary.p8" \
+              --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
+            echo "::error::notarisation $STATUS"
+            exit 1
+          fi
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+      - name: macOS, remove the signing keychain and key
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"
+
+      # The disk image is the file people download, so run the app from inside it.
+      - name: macOS, check the app inside the disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          MNT="$RUNNER_TEMP/dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$NAME.dmg"
+          ls -la "$MNT"
+          python ci/tools/smoke_frozen.py src "$MNT/$APP/Contents/MacOS/$NAME" --screenshot window.png
+          if [ "$MACOS_SIGN" = "yes" ]; then
+            spctl --assess --type execute --verbose=2 "$MNT/$APP"
+          fi
+          hdiutil detach "$MNT"
+
+      - name: macOS, keep the screenshot of the window
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-${{ matrix.label }}
+          path: window.png
+          if-no-files-found: warn
 
       - name: Package
         shell: bash
@@ -115,16 +260,18 @@ jobs:
         run: |
           set -e
           pkg="$NAME-${VERSION}-${{ matrix.label }}"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            mv "$NAME.dmg" "$pkg.dmg"
+            shasum -a 256 "$pkg.dmg"
+            ls -la "$pkg.dmg"
+            exit 0
+          fi
           mkdir -p "pkg/$pkg"
           cp ci/packaging/README.txt src/LICENSE "pkg/$pkg/"
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp "src/dist/$NAME.exe" "pkg/$pkg/"
             (cd "pkg/$pkg" && sha256sum "$NAME.exe" > SHA256SUMS.txt && cat SHA256SUMS.txt)
             (cd pkg && 7z a -bd "../$pkg.zip" "$pkg" > /dev/null)
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            cp "src/dist/$NAME" "pkg/$pkg/"
-            (cd "pkg/$pkg" && shasum -a 256 "$NAME" > SHA256SUMS.txt && cat SHA256SUMS.txt)
-            (cd pkg && ditto -c -k --keepParent "$pkg" "../$pkg.zip")
           else
             cp "src/dist/$NAME" "pkg/$pkg/"
             (cd "pkg/$pkg" && sha256sum "$NAME" > SHA256SUMS.txt && cat SHA256SUMS.txt)
@@ -139,6 +286,7 @@ jobs:
           path: |
             ${{ env.NAME }}-*.zip
             ${{ env.NAME }}-*.tar.gz
+            ${{ env.NAME }}-*.dmg
           if-no-files-found: error
 
   release:
@@ -162,13 +310,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: ${{ env.NAME }}-*
           merge-multiple: true
 
-      - name: Checksums of the archives and the source file
+      - name: Checksums of the downloads and the source file
         run: |
           cp src/mapdownloader.py artifacts/
           cd artifacts && sha256sum "$NAME"-* mapdownloader.py > SHA256SUMS.txt && cat SHA256SUMS.txt
           test "$(wc -l < SHA256SUMS.txt)" -eq 7
+          test "$(ls "$NAME"-*.dmg | wc -l)" -eq 2
 
       - name: Create the release
         env:

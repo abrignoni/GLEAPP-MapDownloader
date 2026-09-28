@@ -11,9 +11,14 @@ machine. GLEAPP itself never goes online; this tool is the part that does.
 
 ## Getting it
 
-- **Executables**: the [latest release](https://github.com/abrignoni/GLEAPP-MapDownloader/releases/latest)
-  has builds for Windows, macOS and Linux (x64 and arm64). Unzip and run. They are not
-  code signed; the `README.txt` inside says what Windows and macOS will ask the first time.
+- **macOS**: the [latest release](https://github.com/abrignoni/GLEAPP-MapDownloader/releases/latest)
+  has a disk image for Apple silicon and one for Intel Macs. Open it and drag
+  **GLEAPP Map Downloader** to Applications. The app is signed with a Developer ID and
+  notarised by Apple. For the command line, run the executable inside the app:
+  `"/Applications/GLEAPP Map Downloader.app/Contents/MacOS/GLEAPP-MapDownloader" --help`.
+- **Windows and Linux**: the same release has a single executable for each (x64 and
+  arm64). Unzip and run. They are not code signed; the `README.txt` inside says what
+  Windows will ask the first time.
 - **Python**: `python3 mapdownloader.py`, Python 3.10 or later. The window needs Tk, which
   some Linux distributions package separately (`python3-tk` on Debian and Ubuntu).
 
@@ -73,6 +78,14 @@ downloads an area once, into a file you keep. This project is not affiliated wit
 or the OpenStreetMap Foundation.
 
 The tool itself is MIT licensed (see `LICENSE`).
+
+## Building
+
+The release workflow builds everything on GitHub Actions: one executable each for Windows
+and Linux, and for macOS an app bundle from `packaging/mapdownloader.spec`, signed,
+notarised and packed into a disk image the way GLEAPP's is. The icons all come from
+`packaging/logo.svg`; after changing it, run `python tools/make_icons.py` (it needs
+`rsvg-convert`, Pillow, and `iconutil` on macOS) and commit what it rewrites.
 
 ## Testing
 

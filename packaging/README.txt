@@ -3,21 +3,19 @@ GLEAPP Map Downloader, built as a standalone executable
 
   GLEAPP-MapDownloader   the tool (GLEAPP-MapDownloader.exe on Windows).
                          Double-click it for the window: pick an area and a
-                         detail level, Check size, then Download. On macOS and
-                         Windows a terminal window opens beside it; leave it
-                         open while the tool runs.
+                         detail level, Check size, then Download. On Windows a
+                         terminal window opens beside it; leave it open while
+                         the tool runs.
 
                          Or run it from a terminal in this folder, for example:
                              GLEAPP-MapDownloader --list-regions
                              GLEAPP-MapDownloader --region florida --maxzoom 12 --size-only
                              GLEAPP-MapDownloader --region florida --maxzoom 12 --out florida.pmtiles
                              GLEAPP-MapDownloader --bbox=-77.12,38.79,-76.90,38.99 --maxzoom 15 --out dc.pmtiles
-                         On macOS and Linux write ./GLEAPP-MapDownloader from
-                         this folder.
+                         On Linux write ./GLEAPP-MapDownloader from this folder.
 
   SHA256SUMS.txt         the hash of the executable as built. Check it with
                              certutil -hashfile GLEAPP-MapDownloader.exe SHA256   (Windows)
-                             shasum -a 256 -c SHA256SUMS.txt                      (macOS)
                              sha256sum -c SHA256SUMS.txt                          (Linux)
 
 Run it on a machine with internet access. It reads the Protomaps planet
@@ -32,14 +30,9 @@ repository's own GitHub Actions workflow, and is not code signed:
 
   Windows   SmartScreen may ask once before running it. Unzip to a local
             folder rather than running from a network share.
-  macOS     Gatekeeper will refuse a downloaded, unsigned program on first
-            run. Right-click (Control-click) GLEAPP-MapDownloader in Finder
-            and choose Open, once, or remove the quarantine mark from this
-            folder:
-                xattr -dr com.apple.quarantine .
   Linux     mark the file executable if the archive did not keep the bit:
                 chmod +x GLEAPP-MapDownloader
 
 Builds: windows-x64, windows-arm64 (native for Windows on ARM; the x64 build
-also runs there through emulation), macos-arm64 (Apple silicon), macos-x64
-(Intel), linux-x64, linux-arm64.
+also runs there through emulation), linux-x64, linux-arm64. macOS is a signed,
+notarised disk image instead: see the release page.
