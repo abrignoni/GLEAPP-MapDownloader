@@ -1,6 +1,6 @@
 """Check that a built GLEAPP-MapDownloader behaves as the Python file it was built from.
 
-    python tools/smoke_frozen.py <source folder> <executable>
+    python tools/smoke_frozen.py <source folder> <executable> [--screenshot PNG]
 
 <source folder> is a checkout holding mapdownloader.py and tests/ (the build workflow checks
 out the tag being released there). A synthetic planet from tests/synthetic_planet.py is
@@ -8,7 +8,8 @@ served on 127.0.0.1, and the same area is downloaded once through `python mapdow
 and once through the executable: the two files must be byte-identical. --version and
 --list-regions must agree too. Last, the executable is started with no arguments and must
 still be running, with its window open, a few seconds later; on Linux run this under
-xvfb-run so there is a display.
+xvfb-run so there is a display. On macOS, --screenshot saves the screen while the window
+is open, for looking at the window without a Mac at hand.
 """
 
 from __future__ import annotations
@@ -27,10 +28,13 @@ def run(cmd: list[str]) -> str:
     return r.stdout
 
 
-def window_stays_open(exe: str, seconds: float = 8.0) -> None:
+def window_stays_open(exe: str, seconds: float = 8.0, screenshot: str | None = None) -> None:
     proc = subprocess.Popen([exe], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         time.sleep(seconds)
+        if screenshot and sys.platform == "darwin" and proc.poll() is None:
+            subprocess.run(["screencapture", "-x", screenshot], check=False)
+            print("screenshot:", screenshot, Path(screenshot).exists())
         if proc.poll() is not None:
             out, err = proc.communicate()
             sys.exit(f"the window closed on its own (exit {proc.returncode})\n{out[-2000:]}\n{err[-4000:]}")
@@ -49,6 +53,11 @@ def window_stays_open(exe: str, seconds: float = 8.0) -> None:
 
 
 def main(argv: list[str]) -> int:
+    screenshot = None
+    if "--screenshot" in argv:
+        i = argv.index("--screenshot")
+        screenshot = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     if len(argv) != 2:
         sys.exit(__doc__)
     src = Path(argv[0]).resolve()
@@ -76,7 +85,7 @@ def main(argv: list[str]) -> int:
             print("the files differ")
             return 1
         assert tiles > 1000, tiles
-    window_stays_open(exe)
+    window_stays_open(exe, screenshot=screenshot)
     print("the executable wrote the same file as the source")
     return 0
 

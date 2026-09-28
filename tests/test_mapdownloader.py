@@ -177,6 +177,15 @@ def test_command_line_refusals(args, message):
     assert r.returncode == 2 and message in r.stderr
 
 
+@pytest.mark.parametrize("name, size", [("ICON_64", 64), ("ICON_32", 32), ("LOGO_96", 96)])
+def test_the_inline_logos_are_pngs_of_their_size(name, size):
+    import base64
+    import struct
+    png = base64.b64decode("".join(getattr(md, name)))
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and png[12:16] == b"IHDR"
+    assert struct.unpack(">II", png[16:24]) == (size, size)
+
+
 def test_version():
     assert run_cli("--version").stdout.strip() == f"GLEAPP-MapDownloader {md.__version__}"
 
@@ -244,6 +253,11 @@ def test_window_downloads_the_box_shown_not_an_earlier_size_check(url, tmp_path,
             else:
                 root.after(25, lambda: when(cond, then, tries + 1))
 
+        seen["header logo"] = [str(w.cget("image")) for w in ws
+                               if isinstance(w, ttk.Label) and str(w.cget("image"))]
+        root.update_idletasks()
+        seen["width"] = root.winfo_reqwidth() / max(root.winfo_fpixels("1i") / 96, 1.0)
+
         def check_size():
             area.set("Exact box…")
             area.event_generate("<<ComboboxSelected>>")
@@ -288,5 +302,7 @@ def test_window_downloads_the_box_shown_not_an_earlier_size_check(url, tmp_path,
             except tk.TclError:
                 pass
     assert "timeout" not in seen, seen
+    assert len(seen["header logo"]) == 1                        # the map logo in the header
+    assert seen["width"] < 800, seen["width"]       # fits a small screen; unwrapped it was 1,011
     assert seen["first file"] == pytest.approx([0.0, 0.0, 40.0, 30.0])
     assert seen["plans made by the last download"] == 0

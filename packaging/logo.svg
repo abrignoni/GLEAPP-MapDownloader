@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GLEAPP Map Downloader logo: a folded map with a pin, in GLEAPP's colours.
+     The vector master for every icon; tools/make_icons.py renders the rest. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
+  <g stroke-linejoin="round">
+    <polygon points="7,15.8 23,10.8 23,48.9 7,53.9" fill="#4c8dff"/>
+    <polygon points="23,10.8 41,15.8 41,53.9 23,48.9" fill="#2f67cf"/>
+    <polygon points="41,15.8 57,10.4 57,49.4 41,53.9" fill="#4c8dff"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="butt">
+    <polyline points="7,34.5 23,28.2 31.4,32.6"/>
+    <polyline points="41,37.8 57,30.4"/>
+  </g>
+  <path d="M37.6 43.2 C35.4 37.2 28.2 31.2 28.2 22.6 A9.4 9.4 0 0 1 47 22.6 C47 31.2 39.8 37.2 37.6 43.2 Z"
+        fill="#fd9b41"/>
+  <circle cx="37.6" cy="22.6" r="4.2" fill="#141414"/>
+</svg>
