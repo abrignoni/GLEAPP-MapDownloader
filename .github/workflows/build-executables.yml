@@ -98,7 +98,9 @@ jobs:
         working-directory: src
         shell: bash
         run: |
-          pyinstaller --noconfirm --clean --onefile --console --icon packaging/icon.ico --name "$NAME" mapdownloader.py
+          # Windows: no console window beside the GUI; the command line still runs but prints nothing
+          CONSOLE=--console; [ "$RUNNER_OS" = "Windows" ] && CONSOLE=--windowed
+          pyinstaller --noconfirm --clean --onefile $CONSOLE --icon packaging/icon.ico --name "$NAME" mapdownloader.py
           ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           echo "BIN=src/dist/$NAME$ext" >> "$GITHUB_ENV"
 
