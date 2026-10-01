@@ -3,9 +3,7 @@ GLEAPP Map Downloader, built as a standalone executable
 
   GLEAPP-MapDownloader   the tool (GLEAPP-MapDownloader.exe on Windows).
                          Double-click it for the window: pick an area and a
-                         detail level, Check size, then Download. On Windows a
-                         terminal window opens beside it; leave it open while
-                         the tool runs.
+                         detail level, Check size, then Download.
 
                          Or run it from a terminal in this folder, for example:
                              GLEAPP-MapDownloader --list-regions
@@ -13,6 +11,9 @@ GLEAPP Map Downloader, built as a standalone executable
                              GLEAPP-MapDownloader --region florida --maxzoom 12 --out florida.pmtiles
                              GLEAPP-MapDownloader --bbox=-77.12,38.79,-76.90,38.99 --maxzoom 15 --out dc.pmtiles
                          On Linux write ./GLEAPP-MapDownloader from this folder.
+                         On Windows the command line runs and writes its file,
+                         but prints nothing: the .exe is built without a
+                         console, so none opens beside the window.
 
   SHA256SUMS.txt         the hash of the executable as built. Check it with
                              certutil -hashfile GLEAPP-MapDownloader.exe SHA256   (Windows)

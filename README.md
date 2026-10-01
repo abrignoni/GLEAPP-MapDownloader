@@ -18,7 +18,9 @@ machine. GLEAPP itself never goes online; this tool is the part that does.
   `"/Applications/GLEAPP Map Downloader.app/Contents/MacOS/GLEAPP-MapDownloader" --help`.
 - **Windows and Linux**: the same release has a single executable for each (x64 and
   arm64). Unzip and run. They are not code signed; the `README.txt` inside says what
-  Windows will ask the first time.
+  Windows will ask the first time. The Windows executable is built without a console, so
+  no terminal window opens beside the window; from the command line it runs and writes its
+  file but prints nothing. For progress output on Windows, run `mapdownloader.py` with Python.
 - **Python**: `python3 mapdownloader.py`, Python 3.10 or later. The window needs Tk, which
   some Linux distributions package separately (`python3-tk` on Debian and Ubuntu).
 
